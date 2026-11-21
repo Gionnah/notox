@@ -68,16 +68,6 @@ export async function extractSourceContent(params: {
     };
   }
 
-  if (kind === "unsupported_url") {
-    return {
-      kind,
-      title: null,
-      text: "",
-      warning:
-        "Seules les URLs Facebook sont prises en charge pour le moment. Collez le texte directement si besoin.",
-    };
-  }
-
   if (!normalizedValue) {
     return {
       kind,
@@ -87,7 +77,7 @@ export async function extractSourceContent(params: {
     };
   }
 
-  // kind === "facebook_url" : 1) tentative légère via Cheerio
+  // kind === "facebook_url" : 1) extraction légère via Cheerio
   let directTitle: string | null = null;
   let directText = "";
 
@@ -121,7 +111,7 @@ export async function extractSourceContent(params: {
     };
   }
 
-  // 2) Secours Apify si la description directe est absente ou incomplète
+  // 2) Fallback Apify si la description directe est absente ou incomplète
   try {
     const apifyResult = await fetchFacebookPostViaApify(normalizedValue);
     if (apifyResult && apifyResult.text.length > 0) {

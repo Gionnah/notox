@@ -1,10 +1,22 @@
 import type { QueryCheckInput } from "../routes/queryCheck.routes.ts";
 
-export type SourceKind =
-  | "none"
-  | "raw_text"
-  | "facebook_url"
-  | "unsupported_url";
+export type SourceKind = "none" | "raw_text" | "facebook_url";
+
+export type QueryCheckErrorCode = "UNSUPPORTED_PLATFORM";
+
+export class UnsupportedPlatformError extends Error {
+  public readonly code: QueryCheckErrorCode = "UNSUPPORTED_PLATFORM";
+  public readonly hostname: string;
+
+  constructor(hostname: string, message?: string) {
+    super(
+      message ??
+        `Le domaine "${hostname}" n'est pas pris en charge : seules les URLs Facebook sont acceptées pour le moment.`
+    );
+    this.name = "UnsupportedPlatformError";
+    this.hostname = hostname;
+  }
+}
 
 export interface CheckedQuery {
   question: string | null;
@@ -14,6 +26,13 @@ export interface CheckedQuery {
     normalizedValue: string | null;
     hostname: string | null;
   };
+}
+
+const FACEBOOK_HOST_REGEX =
+  /^(?:(?:[\w-]+\.)*facebook\.com|fb\.watch)$/i;
+
+export function isFacebookHostname(hostname: string): boolean {
+  return FACEBOOK_HOST_REGEX.test(hostname.trim().toLowerCase());
 }
 
 export function detectSource(rawSource?: string): CheckedQuery["source"] {
@@ -27,30 +46,36 @@ export function detectSource(rawSource?: string): CheckedQuery["source"] {
   }
 
   try {
-    const url = new URL(rawSource);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
+    const parsed = new URL(rawSource);
+
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      const host = parsed.hostname.toLowerCase();
+
+      if (!isFacebookHostname(host)) {
+        throw new UnsupportedPlatformError(host);
+      }
+
       return {
-        kind: "raw_text",
+        kind: "facebook_url",
         rawValue: rawSource,
-        normalizedValue: rawSource,
-        hostname: null,
+        normalizedValue: parsed.toString(),
+        hostname: host,
       };
     }
 
-    const host = url.hostname.toLowerCase();
-    const isFacebook =
-      host === "facebook.com" ||
-      host.endsWith(".facebook.com") ||
-      host === "fb.watch" ||
-      host === "m.facebook.com";
-
+    // Autre schéma non HTTP(S) (ex. ftp:// ou texte contenant ":") -> traité comme texte brut
     return {
-      kind: isFacebook ? "facebook_url" : "unsupported_url",
+      kind: "raw_text",
       rawValue: rawSource,
-      normalizedValue: url.toString(),
-      hostname: host,
+      normalizedValue: rawSource,
+      hostname: null,
     };
-  } catch {
+  } catch (err) {
+    if (err instanceof UnsupportedPlatformError) {
+      throw err;
+    }
+
+    // Pas une URL valide -> texte brut
     return {
       kind: "raw_text",
       rawValue: rawSource,

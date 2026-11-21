@@ -1,7 +1,8 @@
 import { Router,type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
-import { runQueryCheck } from "../services/queryCheck.service.js";
+import { runQueryCheck, UnsupportedPlatformError } from "../services/queryCheck.service.js";
 import { extractSourceContent } from "../services/contentExtractor.service.js";
+
 
 export const queryCheckRouter = Router();
 
@@ -48,6 +49,14 @@ queryCheckRouter.post(
         extracted,
       });
     } catch (err) {
+      // ... à l'intérieur du catch de la route POST :
+      if (err instanceof UnsupportedPlatformError) {
+        return res.status(422).json({
+          error: err.code,
+          hostname: err.hostname,
+          message: err.message,
+        });
+      }
       return next(err);
     }
   }
