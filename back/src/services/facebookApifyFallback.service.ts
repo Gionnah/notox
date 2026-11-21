@@ -1,4 +1,5 @@
 import { ApifyClient } from "apify-client";
+import { env } from "../config/env.js";
 
 export interface ApifyFacebookExtraction {
   title: string | null;
@@ -22,9 +23,8 @@ export async function fetchFacebookPostViaApify(
   url: string,
   waitSecs = 25
 ): Promise<ApifyFacebookExtraction | null> {
-  const token = process.env.APIFY_TOKEN?.trim();
-  const actorId =
-    process.env.APIFY_FACEBOOK_ACTOR_ID?.trim() || "apify/facebook-posts-scraper";
+  const token = env.APIFY_TOKEN;
+  const actorId = env.APIFY_FACEBOOK_ACTOR_ID;
 
   if (!token) {
     return null;

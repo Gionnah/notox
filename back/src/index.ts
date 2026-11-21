@@ -1,20 +1,11 @@
-import 'dotenv/config';
+import { env } from './config/env.js';
 import { queryCheckRouter } from './routes/queryCheck.routes.js';
-import express, { type Express, type Request, type Response, Router, type NextFunction } from 'express';
+import express, { type Express, type Request, type Response } from 'express';
 
 const app: Express = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = env.PORT;
 
 app.use(express.json());
-
-// interface AnalyzeInfoReq {
-//   url_to_check?: string;
-//   text_to_check?: string;
-// }
-
-// interface AnalyzeInfoRes {
-
-// }
 
 app.get('/', (req: Request, res: Response) => { // health check
   res.json({message: 'Hello World!'});
