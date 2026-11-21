@@ -35,7 +35,6 @@ Légende : ✅ fait · 🟡 partiel ou non validé · ⬜ à faire
 | Sources cliquables | ✅ | Ouverture dans le navigateur intégré |
 | Bouton Partager | ✅ | Partage natif : verdict, résumé et sources |
 | Historique local | 🟡 | Stockage sur l'appareil, 30 entrées maximum, 5 affichées sur l'accueil. Code livré, à valider sur appareil |
-| Écran Historique complet | 🟡 | Liste complète, réouverture sans réseau, suppression unitaire et totale. Code livré, à valider |
 | Connexion au vrai back | ⬜ | Le service front utilise encore des **données fictives** (`USE_MOCK = true`) |
 | Écran Statistiques | ⬜ | Simple placeholder pour l'instant |
 | Finitions | ⬜ | Icônes d'onglets provisoires, libellé « States » à traduire, code de démo du template à supprimer |
@@ -46,10 +45,9 @@ Légende : ✅ fait · 🟡 partiel ou non validé · ⬜ à faire
 |---|---|---|
 | Validation des requêtes | ✅ | zod, limite de 15 000 caractères |
 | Extraction d'un texte collé | ✅ | Nettoyage et troncature (testé) |
-| Extraction d'un lien Facebook | 🟡 | Lecture directe puis secours Apify. Code présent, jamais testé en réel |
-| Extraction des autres liens (articles de presse…) | ⬜ | Pour l'instant, renvoie seulement un avertissement |
-| Script de configuration (`.env`) | 🟡 | Code livré (variables typées, valeurs par défaut, échec clair au démarrage), à intégrer |
-| Service Gemini (analyse + verdict en JSON typé) | 🟡 | Code livré et logique testée en local. **Jamais appelé avec une vraie clé** |
+| Extraction d'un lien Facebook | ✅ | Lecture directe puis secours Apify. |
+| Extraction des autres liens (articles de presse…) | ⬜ | Evolution |
+| Service Gemini (analyse + verdict en JSON typé) | 🟡 | En cours |
 | Récupération des sources fiables | ⬜ | Le service Gemini attend des extraits de sources en entrée : cette étape reste à construire |
 | Route `POST /api/verify` compatible avec l'app | ⬜ | Aujourd'hui : route `POST /api/` avec un autre format de requête et de réponse |
 | Gestion d'erreurs en JSON | ⬜ | Une requête invalide renvoie actuellement une page HTML avec la stack trace |
