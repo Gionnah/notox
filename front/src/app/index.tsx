@@ -1,16 +1,24 @@
 import { useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { HistoryList } from '@/components/history-list';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { VerifyModal, type VerifyStatus } from '@/components/pages/verify/verify-modal';
+import { VerifyModal, type VerifyStatus } from '@/components/verify-modal';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useHistory } from '@/hooks/use-history';
 import { useTheme } from '@/hooks/use-theme';
-import { verifyInfo } from '@/services/verify';
-import type { VerificationResult } from '@/types/verification';
+import { verifyInfo } from '@/services/api/verify';
+import type { HistoryItem, VerificationResult } from '@/types/verification';
 
 const URL_REGEX = /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/\S*)?$/i;
+const RECENT_COUNT = 5;
+
+type CurrentQuery = {
+  content: string;
+  isUrl: boolean;
+};
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -19,6 +27,7 @@ export default function HomeScreen() {
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
   };
   const theme = useTheme();
+  const { items, addItem, clear } = useHistory();
 
   const [value, setValue] = useState('');
   const [pressed, setPressed] = useState(false);
@@ -26,6 +35,8 @@ export default function HomeScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [status, setStatus] = useState<VerifyStatus>('loading');
   const [result, setResult] = useState<VerificationResult | null>(null);
+  // Ce que la modale affiche : une nouvelle vérification ou un élément de l'historique
+  const [current, setCurrent] = useState<CurrentQuery>({ content: '', isUrl: false });
 
   // Permet d'ignorer la réponse d'une requête si la modale a été fermée entre-temps
   const requestId = useRef(0);
@@ -36,16 +47,21 @@ export default function HomeScreen() {
 
   const runVerification = async () => {
     const id = ++requestId.current;
+    const input = trimmed;
+    const inputIsUrl = isUrl;
 
+    setCurrent({ content: input, isUrl: inputIsUrl });
     setStatus('loading');
     setResult(null);
     setModalVisible(true);
 
     try {
-      const data = await verifyInfo({ input: trimmed, type: isUrl ? 'url' : 'text' });
+      const data = await verifyInfo({ input, type: inputIsUrl ? 'url' : 'text' });
       if (id !== requestId.current) return;
+
       setResult(data);
       setStatus('success');
+      addItem(input, inputIsUrl, data);
     } catch {
       if (id !== requestId.current) return;
       setStatus('error');
@@ -55,6 +71,23 @@ export default function HomeScreen() {
   const handleVerify = () => {
     if (!canSubmit) return;
     runVerification();
+  };
+
+  const handleSelectHistory = (item: HistoryItem) => {
+    // annule une éventuelle requête encore en cours
+    requestId.current++;
+
+    setCurrent({ content: item.input, isUrl: item.isUrl });
+    setResult(item.result);
+    setStatus('success');
+    setModalVisible(true);
+  };
+
+  const handleClearHistory = () => {
+    Alert.alert('Effacer l\'historique', 'Toutes les vérifications enregistrées seront supprimées.', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Effacer', style: 'destructive', onPress: clear },
+    ]);
   };
 
   const handleClose = () => {
@@ -134,6 +167,12 @@ export default function HomeScreen() {
                 Vérifier
               </ThemedText>
             </Pressable>
+
+            <HistoryList
+              items={items.slice(0, RECENT_COUNT)}
+              onSelect={handleSelectHistory}
+              onClear={handleClearHistory}
+            />
           </ThemedView>
         </ThemedView>
       </ScrollView>
@@ -144,8 +183,8 @@ export default function HomeScreen() {
         onRetry={runVerification}
         status={status}
         result={result}
-        content={trimmed}
-        isUrl={isUrl}
+        content={current.content}
+        isUrl={current.isUrl}
       />
     </>
   );

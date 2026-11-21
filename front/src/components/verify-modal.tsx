@@ -28,7 +28,7 @@ type VerifyModalProps = {
   isUrl: boolean;
 };
 
-const VERDICTS: Record<Verdict, { label: string; headline: string; color: string }> = {
+export const VERDICTS: Record<Verdict, { label: string; headline: string; color: string }> = {
   true: {
     label: 'Vrai',
     headline: 'Cette information est vraie',
