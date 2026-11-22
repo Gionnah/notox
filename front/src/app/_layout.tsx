@@ -36,6 +36,14 @@ export default function TabLayout() {
           />
         </NativeTabs.Trigger>
 
+        <NativeTabs.Trigger name="protect">
+          <NativeTabs.Trigger.Label>Protéger</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon
+            src={require('@/assets/images/tabIcons/explore.png')}
+            renderingMode="template"
+          />
+        </NativeTabs.Trigger>
+
         {/** history - where user see her last searches */}
         <NativeTabs.Trigger name="user-history"> {/** a mettre ?? icon */}
           <NativeTabs.Trigger.Label>Historique</NativeTabs.Trigger.Label>

@@ -17,6 +17,11 @@ const envSchema = z.object({
     z.coerce.number().int().min(1).max(65535).default(3000),
   ),
   GEMINI_API_KEY: optionalString,
+  PROVENANCE_DB_PATH: z.preprocess(
+    emptyToUndefined,
+    z.string().trim().min(1).default("./data/notox.sqlite"),
+  ),
+  CORS_ORIGINS: z.preprocess(emptyToUndefined, z.string().trim().optional()),
   APIFY_TOKEN: optionalString,
   APIFY_FACEBOOK_ACTOR_ID: z.preprocess(
     emptyToUndefined,

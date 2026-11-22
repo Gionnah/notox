@@ -1,0 +1,182 @@
+import { File } from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+
+import { markProtectedMediaSynced, signRequestMessage } from '@/services/local/provenance';
+import type { ProtectedMedia } from '@/types/provenance';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
+const REQUEST_TIMEOUT_MS = 60_000;
+
+export type UrlAnalysisReport = {
+  id: string;
+  sourceUrl: string;
+  checkedAt: number;
+  registeredContentCount: number;
+  comparedImageCount: number;
+  skippedImageCount: number;
+  matches: Array<{
+    imageUrl: string;
+    imageHash: string;
+    candidates: Array<{ mediaId: string; similarity: number }>;
+  }>;
+  disclaimer: string;
+};
+
+function getApiUrl(): string {
+  if (!API_URL) {
+    throw new Error("EXPO_PUBLIC_API_URL n'est pas configurée.");
+  }
+  return API_URL.replace(/\/+$/, '');
+}
+
+function imageMimeType(file: File): string {
+  switch (file.extension.toLowerCase()) {
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.heic':
+      return 'image/heic';
+    case '.heif':
+      return 'image/heif';
+    default:
+      throw new Error("Format non pris en charge pour l'analyse IA (JPEG, PNG ou WebP requis).");
+  }
+}
+
+export async function syncProtectedMedia(media: ProtectedMedia): Promise<void> {
+  const file = new File(media.uri);
+  if (!file.exists) throw new Error("Le fichier protégé n'est plus accessible.");
+
+  const record = {
+    id: media.id,
+    sha256: media.sha256,
+    createdAt: media.createdAt,
+    publicKey: media.publicKey,
+    signature: media.signature,
+  };
+  const bytes = await file.bytes();
+  const response = await fetch(`${getApiUrl()}/api/provenance/media`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': imageMimeType(file),
+      'X-Notox-Record': encodeURIComponent(JSON.stringify(record)),
+      Accept: 'application/json',
+    },
+    body: Uint8Array.from(bytes).buffer,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const data: unknown = await response.json().catch(() => null);
+    const message =
+      typeof data === 'object' &&
+      data !== null &&
+      'error' in data &&
+      typeof data.error === 'string'
+        ? data.error
+        : `Erreur du serveur (${response.status}).`;
+    throw new Error(message);
+  }
+  await markProtectedMediaSynced(media.id);
+}
+
+export async function analyzePageUrl(url: string): Promise<UrlAnalysisReport> {
+  const cleanUrl = url.trim();
+  const timestamp = Date.now();
+  const nonce = Crypto.randomUUID();
+  const signedMessage = JSON.stringify({
+    domain: 'notox-url-analysis-v1',
+    url: encodeURIComponent(cleanUrl),
+    timestamp,
+    nonce,
+  });
+  const [publicKey, signature] = await Promise.all([
+    import('@/services/local/provenance').then(({ getSigningPublicKey }) => getSigningPublicKey()),
+    signRequestMessage(signedMessage),
+  ]);
+  const response = await fetch(`${getApiUrl()}/api/provenance/analyze-url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ url: cleanUrl, publicKey, timestamp, nonce, signature }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  const data: unknown = await response.json();
+  if (!response.ok) {
+    const message =
+      typeof data === 'object' &&
+      data !== null &&
+      'error' in data &&
+      typeof data.error === 'string'
+        ? data.error
+        : `Erreur du serveur (${response.status}).`;
+    throw new Error(message);
+  }
+  if (typeof data !== 'object' || data === null || !('report' in data)) {
+    throw new Error('Le rapport reçu est invalide.');
+  }
+  const report: unknown = data.report;
+  if (
+    typeof report !== 'object' ||
+    report === null ||
+    !('id' in report) ||
+    typeof report.id !== 'string' ||
+    !('sourceUrl' in report) ||
+    typeof report.sourceUrl !== 'string' ||
+    !('checkedAt' in report) ||
+    typeof report.checkedAt !== 'number' ||
+    !('registeredContentCount' in report) ||
+    typeof report.registeredContentCount !== 'number' ||
+    !('comparedImageCount' in report) ||
+    typeof report.comparedImageCount !== 'number' ||
+    !('skippedImageCount' in report) ||
+    typeof report.skippedImageCount !== 'number' ||
+    !('disclaimer' in report) ||
+    typeof report.disclaimer !== 'string' ||
+    !('matches' in report) ||
+    !Array.isArray(report.matches)
+  ) {
+    throw new Error('Le rapport reçu est invalide.');
+  }
+
+  const matches: UrlAnalysisReport['matches'] = report.matches.flatMap((match: unknown) => {
+    if (typeof match !== 'object' || match === null) return [];
+    if (
+      !('imageUrl' in match) ||
+      typeof match.imageUrl !== 'string' ||
+      !('imageHash' in match) ||
+      typeof match.imageHash !== 'string' ||
+      !('candidates' in match) ||
+      !Array.isArray(match.candidates)
+    ) {
+      return [];
+    }
+    const candidates = match.candidates.flatMap((candidate: unknown) => {
+      if (typeof candidate !== 'object' || candidate === null) return [];
+      if (
+        !('mediaId' in candidate) ||
+        typeof candidate.mediaId !== 'string' ||
+        !('similarity' in candidate) ||
+        typeof candidate.similarity !== 'number'
+      ) {
+        return [];
+      }
+      return [{ mediaId: candidate.mediaId, similarity: candidate.similarity }];
+    });
+    return [{ imageUrl: match.imageUrl, imageHash: match.imageHash, candidates }];
+  });
+
+  return {
+    id: report.id,
+    sourceUrl: report.sourceUrl,
+    checkedAt: report.checkedAt,
+    registeredContentCount: report.registeredContentCount,
+    comparedImageCount: report.comparedImageCount,
+    skippedImageCount: report.skippedImageCount,
+    matches,
+    disclaimer: report.disclaimer,
+  };
+}
