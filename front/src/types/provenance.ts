@@ -14,3 +14,10 @@ export type ProvenanceCheck = {
   digestMatches: boolean;
   signatureValid: boolean;
 };
+
+export type DigitalProfile = {
+  displayName: string;
+  bio: string;
+  isPublic: boolean;
+  showMedia: boolean;
+};

@@ -16,9 +16,12 @@ import { embedImage } from "../services/imageEmbedding.service.js";
 import {
   consumeRequestNonce,
   findMedia,
+  getProfile,
   getMedia,
+  saveProfile,
   saveMedia,
   saveReport,
+  type StoredProfile,
   type StoredMedia,
 } from "../services/provenanceStore.service.js";
 
@@ -31,6 +34,7 @@ const MAX_PAGE_IMAGES = 8;
 const PUBLIC_KEY_PATTERN = /^[0-9a-f]{64}$/i;
 const SIGNATURE_PATTERN = /^[0-9a-f]{128}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
+const PROFILE_AVATAR_COLORS = ["#2878C8", "#7356B5", "#18846A", "#C45A37", "#A54578", "#52733C"];
 
 type RemoteResource = {
   headers: IncomingMessage["headers"];
@@ -56,6 +60,24 @@ const urlAnalysisSchema = z.object({
   nonce: z.string().uuid(),
   signature: z.string().regex(SIGNATURE_PATTERN),
 });
+
+const profileUpdateSchema = z
+  .object({
+    publicKey: z.string().regex(PUBLIC_KEY_PATTERN),
+    timestamp: z.number().int().positive(),
+    nonce: z.string().uuid(),
+    displayName: z.string().trim().max(50),
+    bio: z.string().trim().max(160),
+    isPublic: z.boolean(),
+    showMedia: z.boolean(),
+    signature: z.string().regex(SIGNATURE_PATTERN),
+  })
+  .refine((profile) => !profile.isPublic || profile.displayName.length > 0, {
+    message: "Un nom d'affichage est requis pour rendre le profil public.",
+  })
+  .refine((profile) => profile.isPublic || !profile.showMedia, {
+    message: "Les médias ne peuvent être visibles que sur un profil public.",
+  });
 
 function hexBytes(hex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(hex, "hex"));
@@ -85,6 +107,48 @@ function urlRequestBytes(request: z.infer<typeof urlAnalysisSchema>): Uint8Array
       }),
     ),
   );
+}
+
+function profileUpdateBytes(profile: z.infer<typeof profileUpdateSchema>): Uint8Array {
+  return Uint8Array.from(
+    Buffer.from(
+      JSON.stringify({
+        domain: "notox-profile-update-v1",
+        publicKey: profile.publicKey.toLowerCase(),
+        displayName: profile.displayName,
+        bio: profile.bio,
+        isPublic: profile.isPublic,
+        showMedia: profile.showMedia,
+        timestamp: profile.timestamp,
+        nonce: profile.nonce,
+      }),
+    ),
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
+
+function profileInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length > 1) {
+    return `${parts[0]?.[0] ?? ""}${parts.at(-1)?.[0] ?? ""}`.toLocaleUpperCase();
+  }
+  return (parts[0]?.slice(0, 2) || "N").toLocaleUpperCase();
 }
 
 function isPrivateAddress(address: string): boolean {
@@ -320,17 +384,114 @@ router.post(
   },
 );
 
+router.put("/profile", async (req: Request, res: Response) => {
+  const parsed = profileUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Les informations du profil sont invalides." });
+  }
+  const profile = parsed.data;
+  if (Math.abs(Date.now() - profile.timestamp) > 5 * 60 * 1000) {
+    return res.status(401).json({ error: "La demande de modification a expiré." });
+  }
+  const signatureIsValid = await ed25519.verifyAsync(
+    hexBytes(profile.signature),
+    profileUpdateBytes(profile),
+    hexBytes(profile.publicKey),
+  );
+  if (!signatureIsValid) {
+    return res.status(401).json({ error: "La signature du profil est invalide." });
+  }
+  const ownerKey = profile.publicKey.toLowerCase();
+  if (!consumeRequestNonce(ownerKey, profile.nonce, profile.timestamp)) {
+    return res.status(409).json({ error: "Cette demande a déjà été utilisée." });
+  }
+
+  const storedProfile: StoredProfile = {
+    publicKey: ownerKey,
+    displayName: profile.isPublic ? profile.displayName : "",
+    bio: profile.isPublic ? profile.bio : "",
+    isPublic: profile.isPublic,
+    showMedia: profile.isPublic && profile.showMedia,
+    createdAt: getProfile(ownerKey)?.createdAt ?? Date.now(),
+  };
+  saveProfile(storedProfile);
+  return res.json({
+    publicKey: storedProfile.publicKey,
+    displayName: storedProfile.displayName,
+    bio: storedProfile.bio,
+    isPublic: storedProfile.isPublic,
+    showMedia: storedProfile.showMedia,
+  });
+});
+
 router.get("/profile/:publicKey", (req: Request, res: Response) => {
   const parsedKey = z.string().regex(PUBLIC_KEY_PATTERN).safeParse(req.params.publicKey);
   if (!parsedKey.success) return res.status(400).json({ error: "Clé publique invalide." });
   const ownerKey = parsedKey.data.toLowerCase();
-  const media = getMedia(ownerKey).map(({ id, sha256, signature, createdAt }) => ({
+  const profile = getProfile(ownerKey);
+  if (!profile?.isPublic) return res.status(404).json({ error: "Ce profil est privé ou introuvable." });
+  const media = profile.showMedia ? getMedia(ownerKey).map(({ id, sha256, signature, createdAt }) => ({
     id,
     sha256,
     signature,
     createdAt,
-  }));
-  return res.json({ publicKey: ownerKey, media });
+  })) : [];
+  return res.json({
+    publicKey: ownerKey,
+    displayName: profile.displayName,
+    bio: profile.bio,
+    createdAt: profile.createdAt,
+    mediaVisible: profile.showMedia,
+    media,
+  });
+});
+
+router.get("/p/:publicKey", (req: Request, res: Response) => {
+  const parsedKey = z.string().regex(PUBLIC_KEY_PATTERN).safeParse(req.params.publicKey);
+  if (!parsedKey.success) return res.status(404).type("html").send("Profil introuvable.");
+  const ownerKey = parsedKey.data.toLowerCase();
+  const profile = getProfile(ownerKey);
+  if (!profile?.isPublic) return res.status(404).type("html").send("Ce profil est privé ou introuvable.");
+
+  const initial = profileInitials(profile.displayName);
+  const avatarColor =
+    PROFILE_AVATAR_COLORS[Number.parseInt(ownerKey.slice(0, 2), 16) % PROFILE_AVATAR_COLORS.length] ??
+    PROFILE_AVATAR_COLORS[0];
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  );
+  const media = profile.showMedia ? getMedia(ownerKey) : [];
+  const mediaList = profile.showMedia
+    ? media.length > 0
+      ? `<ul>${media
+          .map(
+            (item) =>
+              `<li><strong>${escapeHtml(item.sha256)}</strong><br><span>Identifiant : ${escapeHtml(item.id)}<br>Enregistré le ${new Date(item.createdAt).toISOString()}</span><details><summary>Signature</summary><code>${escapeHtml(item.signature)}</code></details></li>`,
+          )
+          .join("")}</ul>`
+      : "<p>Aucun média public n'est encore associé à ce profil.</p>"
+    : "<p>Les médias de ce profil ne sont pas publiés.</p>";
+
+  res.type("html").send(`<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(profile.displayName)} · Profil NOTOX</title>
+<style>
+body{margin:0;background:#f3f6fb;color:#182230;font:16px system-ui,sans-serif}
+main{max-width:720px;margin:48px auto;padding:32px;background:#fff;border-radius:20px;box-shadow:0 12px 40px #18223014}
+header{display:flex;align-items:center;gap:18px}.avatar{display:grid;place-items:center;width:68px;height:68px;border-radius:50%;background:#208aef;color:#fff;font-size:26px;font-weight:700}
+h1{margin:0;font-size:26px}p{line-height:1.55}.key{overflow-wrap:anywhere;color:#536273;font-size:13px}
+li{margin:16px 0;padding:16px;background:#f3f6fb;border-radius:12px;overflow-wrap:anywhere}
+li span{color:#536273;font-size:13px}details{margin-top:8px}code{overflow-wrap:anywhere;font-size:12px}
+footer{margin-top:28px;color:#536273;font-size:13px}
+@media(max-width:600px){main{margin:0;padding:24px 18px;min-height:100vh;border-radius:0}}
+</style></head>
+<body><main><header><div class="avatar" style="background:${avatarColor}">${escapeHtml(initial)}</div><div><h1>${escapeHtml(profile.displayName)}</h1><div>Profil de provenance NOTOX</div></div></header>
+${profile.bio ? `<p>${escapeHtml(profile.bio).replace(/\n/g, "<br>")}</p>` : ""}
+<p class="key">Clé publique : ${escapeHtml(ownerKey)}</p>
+<section><h2>Contenus déclarés</h2>${mediaList}</section>
+<footer>Les signatures vérifient l'intégrité des données associées ; elles ne certifient pas une identité civile ni une propriété juridique.</footer>
+</main></body></html>`);
 });
 
 router.post("/analyze-url", async (req: Request, res: Response) => {

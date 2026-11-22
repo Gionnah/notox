@@ -38,6 +38,8 @@ Légende : ✅ fait · 🟡 partiel ou non validé · ⬜ à faire
 | Détection des nouvelles images de la photothèque | 🟡 | Consentement et accès complet requis ; inventaire initial ignoré, scan à l'ouverture/au retour au premier plan et événements actifs, sans garantie en arrière-plan |
 | Synchronisation des preuves et recherche visuelle | 🟡 | Upload temporaire, validation SHA-256/Ed25519, vecteur Gemini 768 dimensions conservé ; requiert `GEMINI_API_KEY` |
 | Analyse d'URL et rapport de similarité | 🟡 | Analyse d'une page HTML publique, jusqu'à 8 images, URL HTTP(S) et ports standards ; résultats indicatifs, non juridiques |
+| Profil numérique pseudonyme | 🟡 | Nom et bio, visibilité privée par défaut, avatar généré, page publique partageable avec preuves facultatives |
+| Récupération de l'identité | ✅ | Export JSON chiffré par phrase secrète (PBKDF2-SHA256 + AES-GCM) ; ne contient pas les images |
 | Provenance C2PA / vidéo | ⬜ | Non implémentées ; les signatures ne certifient pas l'identité humaine ni l'origine de la capture |
 | Saisie d'un texte ou d'un lien + bouton Vérifier | ✅ | Détection « lien » ou « texte », bouton désactivé si le champ est vide |
 | Fenêtre de résultat plein écran | ✅ | Coins arrondis, bouton Fermer, états chargement, erreur (avec Réessayer) et succès |

@@ -172,6 +172,29 @@ export async function getSigningPublicKey(): Promise<string> {
   return bytesToHex(await ed25519.getPublicKeyAsync(privateKey));
 }
 
+export async function exportSigningIdentity(): Promise<{ privateKey: string; publicKey: string }> {
+  const privateKey = await getSigningKey();
+  return {
+    privateKey: bytesToHex(privateKey),
+    publicKey: bytesToHex(await ed25519.getPublicKeyAsync(privateKey)),
+  };
+}
+
+export async function importSigningIdentity(
+  privateKeyHex: string,
+  expectedPublicKey: string
+): Promise<void> {
+  if (!HEX_32_BYTES.test(privateKeyHex) || !HEX_32_BYTES.test(expectedPublicKey)) {
+    throw new Error("La clé de récupération est invalide.");
+  }
+  const privateKey = ed25519.etc.hexToBytes(privateKeyHex);
+  const publicKey = bytesToHex(await ed25519.getPublicKeyAsync(privateKey));
+  if (publicKey !== expectedPublicKey.toLowerCase()) {
+    throw new Error("La clé publique ne correspond pas à la clé privée de la sauvegarde.");
+  }
+  await SecureStore.setItemAsync(SIGNING_KEY_STORAGE_KEY, privateKeyHex.toLowerCase());
+}
+
 export async function signRequestMessage(message: string): Promise<string> {
   const privateKey = await getSigningKey();
   return bytesToHex(await ed25519.signAsync(asciiBytes(message), privateKey));

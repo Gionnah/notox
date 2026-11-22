@@ -14,6 +14,15 @@ export type StoredMedia = {
   embedding: number[];
 };
 
+export type StoredProfile = {
+  publicKey: string;
+  displayName: string;
+  bio: string;
+  isPublic: boolean;
+  showMedia: boolean;
+  createdAt: number;
+};
+
 const databasePath = resolve(env.PROVENANCE_DB_PATH);
 mkdirSync(dirname(databasePath), { recursive: true });
 
@@ -22,7 +31,11 @@ database.pragma("journal_mode = WAL");
 database.exec(`
   CREATE TABLE IF NOT EXISTS profiles (
     public_key TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    is_public INTEGER NOT NULL DEFAULT 0,
+    show_media INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS protected_media (
     id TEXT NOT NULL,
@@ -48,6 +61,61 @@ database.exec(`
     PRIMARY KEY (owner_key, nonce)
   );
 `);
+
+const profileColumns = new Set(
+  (database.pragma("table_info(profiles)") as Array<{ name: string }>).map(({ name }) => name),
+);
+const profileMigrations: Array<[string, string]> = [
+  ["display_name", "TEXT NOT NULL DEFAULT ''"],
+  ["bio", "TEXT NOT NULL DEFAULT ''"],
+  ["is_public", "INTEGER NOT NULL DEFAULT 0"],
+  ["show_media", "INTEGER NOT NULL DEFAULT 0"],
+];
+for (const [column, definition] of profileMigrations) {
+  if (!profileColumns.has(column)) {
+    database.exec(`ALTER TABLE profiles ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+export function getProfile(ownerKey: string): StoredProfile | undefined {
+  const row = database
+    .prepare(
+      `SELECT public_key AS publicKey, display_name AS displayName, bio,
+              is_public AS isPublic, show_media AS showMedia, created_at AS createdAt
+       FROM profiles WHERE public_key = ?`,
+    )
+    .get(ownerKey) as
+    | (Omit<StoredProfile, "isPublic" | "showMedia"> & {
+        isPublic: number;
+        showMedia: number;
+      })
+    | undefined;
+
+  return row
+    ? { ...row, isPublic: row.isPublic === 1, showMedia: row.showMedia === 1 }
+    : undefined;
+}
+
+export function saveProfile(profile: StoredProfile): void {
+  database
+    .prepare(
+      `INSERT INTO profiles (
+         public_key, created_at, display_name, bio, is_public, show_media
+       ) VALUES (
+         @publicKey, @createdAt, @displayName, @bio, @isPublic, @showMedia
+       )
+       ON CONFLICT(public_key) DO UPDATE SET
+         display_name = excluded.display_name,
+         bio = excluded.bio,
+         is_public = excluded.is_public,
+         show_media = excluded.show_media`,
+    )
+    .run({
+      ...profile,
+      isPublic: Number(profile.isPublic),
+      showMedia: Number(profile.showMedia),
+    });
+}
 
 export function getMedia(ownerKey: string): StoredMedia[] {
   const rows = database

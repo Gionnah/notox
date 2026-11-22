@@ -23,3 +23,26 @@ export async function protectImage(_uri: string, _fileName: string): Promise<Pro
 export async function verifyProtectedMedia(_media: ProtectedMedia): Promise<ProvenanceCheck> {
   return unavailable();
 }
+
+export async function getSigningPublicKey(): Promise<string> {
+  return unavailable();
+}
+
+export async function exportSigningIdentity(): Promise<{ privateKey: string; publicKey: string }> {
+  return unavailable();
+}
+
+export async function importSigningIdentity(
+  _privateKeyHex: string,
+  _expectedPublicKey: string
+): Promise<void> {
+  return unavailable();
+}
+
+export async function signRequestMessage(_message: string): Promise<string> {
+  return unavailable();
+}
+
+export async function markProtectedMediaSynced(_id: string): Promise<void> {
+  return unavailable();
+}

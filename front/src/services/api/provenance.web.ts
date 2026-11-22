@@ -1,4 +1,4 @@
-import type { ProtectedMedia } from '@/types/provenance';
+import type { DigitalProfile, ProtectedMedia } from '@/types/provenance';
 import type { UrlAnalysisReport } from './provenance.native';
 
 function unavailable(): never {
@@ -10,5 +10,13 @@ export async function syncProtectedMedia(_media: ProtectedMedia): Promise<void> 
 }
 
 export async function analyzePageUrl(_url: string): Promise<UrlAnalysisReport> {
+  return unavailable();
+}
+
+export async function updateDigitalProfile(_profile: DigitalProfile): Promise<void> {
+  return unavailable();
+}
+
+export async function getPublicProfileUrl(): Promise<string> {
   return unavailable();
 }

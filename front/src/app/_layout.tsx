@@ -44,6 +44,11 @@ export default function TabLayout() {
           />
         </NativeTabs.Trigger>
 
+        <NativeTabs.Trigger name="profile">
+          <NativeTabs.Trigger.Label>Profil</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf="person.crop.circle.fill" md="person" />
+        </NativeTabs.Trigger>
+
         {/** history - where user see her last searches */}
         <NativeTabs.Trigger name="user-history"> {/** a mettre ?? icon */}
           <NativeTabs.Trigger.Label>Historique</NativeTabs.Trigger.Label>

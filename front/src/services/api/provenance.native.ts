@@ -1,8 +1,12 @@
 import { File } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
 
-import { markProtectedMediaSynced, signRequestMessage } from '@/services/local/provenance';
-import type { ProtectedMedia } from '@/types/provenance';
+import {
+  getSigningPublicKey,
+  markProtectedMediaSynced,
+  signRequestMessage,
+} from '@/services/local/provenance';
+import type { DigitalProfile, ProtectedMedia } from '@/types/provenance';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -14,11 +18,11 @@ export type UrlAnalysisReport = {
   registeredContentCount: number;
   comparedImageCount: number;
   skippedImageCount: number;
-  matches: Array<{
+  matches: {
     imageUrl: string;
     imageHash: string;
-    candidates: Array<{ mediaId: string; similarity: number }>;
-  }>;
+    candidates: { mediaId: string; similarity: number }[];
+  }[];
   disclaimer: string;
 };
 
@@ -94,7 +98,7 @@ export async function analyzePageUrl(url: string): Promise<UrlAnalysisReport> {
     nonce,
   });
   const [publicKey, signature] = await Promise.all([
-    import('@/services/local/provenance').then(({ getSigningPublicKey }) => getSigningPublicKey()),
+    getSigningPublicKey(),
     signRequestMessage(signedMessage),
   ]);
   const response = await fetch(`${getApiUrl()}/api/provenance/analyze-url`, {
@@ -179,4 +183,45 @@ export async function analyzePageUrl(url: string): Promise<UrlAnalysisReport> {
     matches,
     disclaimer: report.disclaimer,
   };
+}
+
+export async function updateDigitalProfile(profile: DigitalProfile): Promise<void> {
+  const timestamp = Date.now();
+  const nonce = Crypto.randomUUID();
+  const publicKey = await getSigningPublicKey();
+  const publicFields = {
+    displayName: profile.isPublic ? profile.displayName.trim() : '',
+    bio: profile.isPublic ? profile.bio.trim() : '',
+    isPublic: profile.isPublic,
+    showMedia: profile.isPublic && profile.showMedia,
+  };
+  const signedMessage = JSON.stringify({
+    domain: 'notox-profile-update-v1',
+    publicKey,
+    ...publicFields,
+    timestamp,
+    nonce,
+  });
+  const signature = await signRequestMessage(signedMessage);
+  const response = await fetch(`${getApiUrl()}/api/provenance/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ publicKey, timestamp, nonce, ...publicFields, signature }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const data: unknown = await response.json().catch(() => null);
+    const message =
+      typeof data === 'object' &&
+      data !== null &&
+      'error' in data &&
+      typeof data.error === 'string'
+        ? data.error
+        : `Erreur du serveur (${response.status}).`;
+    throw new Error(message);
+  }
+}
+
+export async function getPublicProfileUrl(): Promise<string> {
+  return `${getApiUrl()}/api/provenance/p/${await getSigningPublicKey()}`;
 }
