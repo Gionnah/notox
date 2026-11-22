@@ -26,6 +26,15 @@ export type UrlAnalysisReport = {
   disclaimer: string;
 };
 
+export type ManipulationLocalization = {
+  modelVersion: 'iml-vit-1024';
+  imageWidth: number;
+  imageHeight: number;
+  heatmapDataUri: string;
+  checkedAt: number;
+  disclaimer: string;
+};
+
 function getApiUrl(): string {
   if (!API_URL) {
     throw new Error("EXPO_PUBLIC_API_URL n'est pas configurée.");
@@ -85,6 +94,78 @@ export async function syncProtectedMedia(media: ProtectedMedia): Promise<void> {
     throw new Error(message);
   }
   await markProtectedMediaSynced(media.id);
+}
+
+export async function localizeProtectedMedia(
+  media: ProtectedMedia
+): Promise<ManipulationLocalization> {
+  const file = new File(media.uri);
+  if (!file.exists) throw new Error("Le fichier protégé n'est plus accessible.");
+  if (file.size > 25 * 1024 * 1024) {
+    throw new Error("Cette image dépasse la taille maximale de 25 Mo.");
+  }
+
+  const bytes = await file.bytes();
+  const record = {
+    id: media.id,
+    sha256: media.sha256,
+    createdAt: media.createdAt,
+    publicKey: media.publicKey,
+    signature: media.signature,
+  };
+  const response = await fetch(`${getApiUrl()}/api/provenance/localize-image`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': imageMimeType(file),
+      'X-Notox-Record': encodeURIComponent(JSON.stringify(record)),
+      Accept: 'application/json',
+    },
+    body: Uint8Array.from(bytes).buffer,
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      typeof data === 'object' &&
+      data !== null &&
+      'error' in data &&
+      typeof data.error === 'string'
+        ? data.error
+        : `Erreur du serveur (${response.status}).`;
+    throw new Error(message);
+  }
+  if (typeof data !== 'object' || data === null) {
+    throw new Error("Le résultat de localisation reçu est invalide.");
+  }
+  const result = data as Record<string, unknown>;
+  if (
+    result.modelVersion !== 'iml-vit-1024' ||
+    typeof result.imageWidth !== 'number' ||
+    !Number.isInteger(result.imageWidth) ||
+    result.imageWidth < 1 ||
+    result.imageWidth > 1024 ||
+    typeof result.imageHeight !== 'number' ||
+    !Number.isInteger(result.imageHeight) ||
+    result.imageHeight < 1 ||
+    result.imageHeight > 1024 ||
+    typeof result.heatmapDataUri !== 'string' ||
+    result.heatmapDataUri.length > 8 * 1024 * 1024 ||
+    !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(result.heatmapDataUri) ||
+    typeof result.checkedAt !== 'number' ||
+    !Number.isFinite(result.checkedAt) ||
+    typeof result.disclaimer !== 'string'
+  ) {
+    throw new Error("Le résultat de localisation reçu est invalide.");
+  }
+
+  return {
+    modelVersion: 'iml-vit-1024',
+    imageWidth: result.imageWidth,
+    imageHeight: result.imageHeight,
+    heatmapDataUri: result.heatmapDataUri,
+    checkedAt: result.checkedAt,
+    disclaimer: result.disclaimer,
+  };
 }
 
 export async function analyzePageUrl(url: string): Promise<UrlAnalysisReport> {

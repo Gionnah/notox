@@ -48,6 +48,14 @@ Quand la surveillance de la photothèque est activée, les nouvelles images dét
 
 Le serveur vérifie la signature et l’empreinte, convertit/redimensionne une copie pour l’analyse Gemini, puis conserve les métadonnées et le vecteur visuel — pas l’image originale. La copie est transmise au serveur et à Google Gemini pour le traitement. Une clé `GEMINI_API_KEY` valide est requise.
 
+### Localiser des manipulations
+
+Dans **Protéger → Médias protégés**, choisissez **Localiser les manipulations**. NOTOX envoie une copie de l’image signée au backend ; celui-ci vérifie son empreinte et sa signature avant de transmettre les octets au service Python local IML-ViT. L’application affiche une heatmap colorée sur l’image normalisée. L’original et sa copie protégée ne sont pas modifiés, et ce parcours n’appelle ni Gemini ni un LLM.
+
+Cette fonction nécessite le dépôt officiel IML-ViT, ses dépendances et un checkpoint obtenus séparément. Le code de démarrage et les instructions sont dans [`back/vision/README.md`](./back/vision/README.md). Le backend renvoie une erreur explicite si le service n’est pas démarré ou si le modèle n’est pas configuré. Le checkpoint n’est pas inclus dans le dépôt ; ses droits d’utilisation doivent être confirmés avant toute distribution commerciale.
+
+La heatmap est un indice probabiliste à examiner, pas une preuve de manipulation, d’origine, de propriété ou d’infraction. Les images plus grandes que 1024 pixels sont réduites pour l’analyse ; de petites modifications peuvent alors devenir moins visibles. Le fonctionnement MPS sur Apple Silicon n’est pas garanti par le dépôt amont et doit être mesuré sur le matériel cible.
+
 ### Rechercher une image sur une page web
 
 Dans l’écran **Protéger**, collez l’URL d’une page puis choisissez **Analyser cette page**. Le serveur recherche les images accessibles dans le HTML et compare jusqu’à 8 images au profil associé à la clé publique de l’appareil.
@@ -106,7 +114,11 @@ npm run dev
 
 Le serveur écoute par défaut sur le port `3000`. Pour la configuration CORS du client web, indiquez les origines autorisées dans `CORS_ORIGINS`, séparées par des virgules.
 
-### 2. Configurer et démarrer l’application
+### 2. (Optionnel) Démarrer le service IML-ViT
+
+Suivez les instructions de [`back/vision/README.md`](./back/vision/README.md) pour installer le runtime Python, obtenir le code et checkpoint officiels, puis démarrer le service sur le port `8001`. Le backend utilise `IML_VIT_SERVICE_URL` (par défaut `http://127.0.0.1:8001`). Si le service est sur un autre hôte, restreignez son accès réseau et configurez le même `IML_VIT_SERVICE_TOKEN` dans les deux services.
+
+### 3. Configurer et démarrer l’application
 
 Dans un autre terminal :
 
@@ -131,6 +143,7 @@ Les routes sont préfixées par `/api/provenance` :
 | Méthode et route | Utilité |
 |---|---|
 | `POST /media` | Vérifie l’empreinte et la signature d’une image, puis enregistre ses métadonnées et son vecteur visuel. |
+| `POST /localize-image` | Vérifie une image signée et renvoie la heatmap IML-ViT ; nécessite le service Python local. |
 | `PUT /profile` | Enregistre des paramètres de profil signés par la clé privée locale. |
 | `GET /profile/:publicKey` | Renvoie les paramètres et preuves autorisés d’un profil public. |
 | `GET /p/:publicKey` | Affiche la page HTML partageable d’un profil public. |

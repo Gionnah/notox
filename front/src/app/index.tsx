@@ -118,9 +118,9 @@ export default function HomeScreen() {
       >
         <ThemedView style={styles.container}>
           <ThemedView style={styles.titleContainer}>
-            <ThemedText type="subtitle">Vérifier une info</ThemedText>
+            <ThemedText type="subtitle">Vérifier une image</ThemedText>
             <ThemedText style={styles.centerText} themeColor="textSecondary">
-              Copier le lien de l'information ou copier son texte ici.
+              Copier le lien de l'information ou televerser l'image.
             </ThemedText>
           </ThemedView>
 

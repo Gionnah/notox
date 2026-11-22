@@ -10,9 +10,14 @@ import rateLimit from "express-rate-limit";
 import ipaddr from "ipaddr.js";
 import { z } from "zod";
 import * as ed25519 from "@noble/ed25519";
+import sharp from "sharp";
 
 import { env } from "../config/env.js";
 import { embedImage } from "../services/imageEmbedding.service.js";
+import {
+  IMLVitServiceError,
+  localizeImageWithIMLVit,
+} from "../services/imlVit.service.js";
 import {
   consumeRequestNonce,
   findMedia,
@@ -185,6 +190,45 @@ async function assertPublicUrl(value: string): Promise<{ url: URL; addresses: Lo
   return { url, addresses };
 }
 
+async function validateImageRecord(
+  imageBytes: Buffer,
+  encodedRecord: string | undefined,
+): Promise<
+  | { valid: true; record: z.infer<typeof imageRecordSchema> }
+  | { valid: false; status: 400 | 422; error: string }
+> {
+  let rawRecord: unknown;
+  try {
+    rawRecord = JSON.parse(decodeURIComponent(encodedRecord ?? ""));
+  } catch {
+    return { valid: false, status: 400, error: "Les métadonnées signées sont invalides." };
+  }
+  const parsed = imageRecordSchema.safeParse(rawRecord);
+  if (!parsed.success) {
+    return { valid: false, status: 400, error: "Les métadonnées signées sont incomplètes." };
+  }
+
+  const record = parsed.data;
+  const digest = createHash("sha256").update(imageBytes).digest("hex");
+  if (digest !== record.sha256.toLowerCase()) {
+    return {
+      valid: false,
+      status: 422,
+      error: "L'empreinte du fichier ne correspond pas aux métadonnées.",
+    };
+  }
+
+  const signatureIsValid = await ed25519.verifyAsync(
+    hexBytes(record.signature),
+    manifestBytes(record),
+    hexBytes(record.publicKey),
+  );
+  if (!signatureIsValid) {
+    return { valid: false, status: 422, error: "La signature de provenance n'est pas valide." };
+  }
+  return { valid: true, record };
+}
+
 async function readLimitedBody(response: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const contentLength = Number(response.headers["content-length"]);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
@@ -332,30 +376,9 @@ router.post(
       return res.status(413).json({ error: "L'image dépasse la limite de 25 Mo." });
     }
 
-    let rawRecord: unknown;
-    try {
-      rawRecord = JSON.parse(decodeURIComponent(req.get("x-notox-record") ?? ""));
-    } catch {
-      return res.status(400).json({ error: "Les métadonnées signées sont invalides." });
-    }
-    const parsed = imageRecordSchema.safeParse(rawRecord);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Les métadonnées signées sont incomplètes." });
-    }
-    const record = parsed.data;
-    const digest = createHash("sha256").update(req.body).digest("hex");
-    if (digest !== record.sha256.toLowerCase()) {
-      return res.status(422).json({ error: "L'empreinte du fichier ne correspond pas aux métadonnées." });
-    }
-
-    const signatureIsValid = await ed25519.verifyAsync(
-      hexBytes(record.signature),
-      manifestBytes(record),
-      hexBytes(record.publicKey),
-    );
-    if (!signatureIsValid) {
-      return res.status(422).json({ error: "La signature de provenance n'est pas valide." });
-    }
+    const validation = await validateImageRecord(req.body, req.get("x-notox-record"));
+    if (!validation.valid) return res.status(validation.status).json({ error: validation.error });
+    const record = validation.record;
 
     const existing = findMedia(record.publicKey, record.id);
     if (existing) {
@@ -380,6 +403,66 @@ router.post(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analyse visuelle indisponible.";
       return res.status(503).json({ error: message });
+    }
+  },
+);
+
+router.post(
+  "/localize-image",
+  (req: Request, res: Response, next) => {
+    const contentType = req.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (
+      contentType !== "image/jpeg" &&
+      contentType !== "image/png" &&
+      contentType !== "image/webp" &&
+      contentType !== "image/heic" &&
+      contentType !== "image/heif"
+    ) {
+      return res.status(415).json({ error: "Seules les images JPEG, PNG, WebP et HEIC/HEIF sont acceptées." });
+    }
+    return next();
+  },
+  express.raw({ type: "image/*", limit: MAX_IMAGE_BYTES }),
+  async (req: Request, res: Response) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: "Le contenu de l'image est vide ou invalide." });
+    }
+
+    const validation = await validateImageRecord(req.body, req.get("x-notox-record"));
+    if (!validation.valid) return res.status(validation.status).json({ error: validation.error });
+
+    const inputMimeType = req.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
+    const isHeif = inputMimeType === "image/heic" || inputMimeType === "image/heif";
+    let modelInput: Buffer;
+    try {
+      modelInput = isHeif
+        ? await sharp(req.body, { limitInputPixels: 40_000_000 })
+            .rotate()
+            .jpeg({ quality: 95 })
+            .toBuffer()
+        : req.body;
+    } catch (error) {
+      console.error("Unable to decode image for IML-ViT:", error);
+      return res.status(422).json({ error: "Le fichier transmis n'est pas une image décodable." });
+    }
+
+    try {
+      const result = await localizeImageWithIMLVit(
+        modelInput,
+        isHeif ? "image/jpeg" : inputMimeType,
+      );
+      return res.json({
+        ...result,
+        checkedAt: Date.now(),
+        disclaimer:
+          "Cette heatmap signale des zones à examiner ; elle ne prouve ni une manipulation, ni une propriété, ni une infraction.",
+      });
+    } catch (error) {
+      if (error instanceof IMLVitServiceError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      console.error("IML-ViT image localization failed:", error);
+      return res.status(503).json({ error: "La localisation des manipulations est indisponible." });
     }
   },
 );

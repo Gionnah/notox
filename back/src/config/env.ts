@@ -17,6 +17,11 @@ const envSchema = z.object({
     z.coerce.number().int().min(1).max(65535).default(3000),
   ),
   GEMINI_API_KEY: optionalString,
+  IML_VIT_SERVICE_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url().default("http://127.0.0.1:8001"),
+  ),
+  IML_VIT_SERVICE_TOKEN: optionalString,
   PROVENANCE_DB_PATH: z.preprocess(
     emptyToUndefined,
     z.string().trim().min(1).default("./data/notox.sqlite"),

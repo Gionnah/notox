@@ -20,7 +20,8 @@ Une application mobile qui permet de **vérifier une information** avant de la c
 | Partie | Technologies |
 |---|---|
 | **Front** (app mobile) | Expo SDK 58, React Native 0.88, Expo Router (onglets natifs), TypeScript, AsyncStorage |
-| **Back** (API) | Node.js, Express 5, TypeScript, zod, Cheerio, Apify, SDK Google Gemini |
+| **Back** (API) | Node.js, Express 5, TypeScript, zod, Cheerio, Apify, SDK Google Gemini, Sharp |
+| **Localisation de manipulations** | Service Python distinct, PyTorch, IML-ViT officiel ; code et checkpoint fournis séparément |
 
 La signature de provenance est créée sur l'appareil. La clé privée est conservée dans SecureStore ; une copie privée, son empreinte, sa signature et sa clé publique sont enregistrées localement. Si l'utilisateur active la synchronisation, une copie est envoyée au serveur puis à Google Gemini pour calculer un vecteur visuel : NOTOX conserve le vecteur et les métadonnées signées, pas le fichier original.
 
@@ -65,11 +66,14 @@ Légende : ✅ fait · 🟡 partiel ou non validé · ⬜ à faire
 | Gestion d'erreurs en JSON | ✅ | Middleware global ; les erreurs internes ne révèlent pas leur détail au client |
 | Limitation de débit, CORS, helmet | 🟡 | CORS et Helmet globaux ; limite de débit actuellement appliquée aux routes provenance uniquement |
 | Statistiques des sujets | ⬜ | Voir section 5 |
-| Tests automatisés, journaux | ⬜ | Aucun |
+| Tests automatisés, journaux | 🟡 | Six tests couvrent le service IML-ViT ; pas de suite automatisée globale |
+| Localisation des manipulations | 🟡 | Route `POST /api/provenance/localize-image` et affichage de heatmap intégrés ; nécessite le service Python, le checkout et le checkpoint IML-ViT. Pas encore validé avec de vrais poids ni sur un appareil |
 
 ## 4. Configuration et limites
 
 Créer `back/.env` à partir de `back/.env.example`, puis configurer `GEMINI_API_KEY`. Définir `EXPO_PUBLIC_API_URL` dans `front/.env` avec l'adresse joignable du serveur (sur un téléphone, utiliser l'adresse réseau du poste, pas `localhost`). La base SQLite est créée à `PROVENANCE_DB_PATH` (par défaut `back/data/notox.sqlite`).
+
+Pour la localisation IML-ViT, démarrer séparément le service décrit dans [`back/vision/README.md`](./back/vision/README.md). Il charge le checkpoint local une fois au démarrage ; `IML_VIT_SERVICE_URL` pointe vers ce service. Cette fonction n’utilise pas Gemini, ne stocke pas l’image et ne fonctionne pas si le code ou les poids du modèle sont absents.
 
 L'accès à toute la photothèque dépend des permissions iOS/Android et des règles des boutiques. L'application ne modifie pas les originaux : elle les copie dans son espace privé, mais la détection n'est pas garantie lorsque l'application est suspendue ou arrêtée. Seules les images sont traitées, pas les vidéos.
 

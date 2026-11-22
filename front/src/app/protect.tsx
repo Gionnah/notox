@@ -17,7 +17,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { analyzePageUrl, syncProtectedMedia, type UrlAnalysisReport } from '@/services/api/provenance';
+import {
+  analyzePageUrl,
+  localizeProtectedMedia,
+  syncProtectedMedia,
+  type ManipulationLocalization,
+  type UrlAnalysisReport,
+} from '@/services/api/provenance';
 import {
   loadAutoProtection,
   loadProtectedMedia,
@@ -50,6 +56,10 @@ export default function ProtectScreen() {
   const [pendingImage, setPendingImage] = useState<SelectedImage | null>(null);
   const [busy, setBusy] = useState(false);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [localizingId, setLocalizingId] = useState<string | null>(null);
+  const [localizationReports, setLocalizationReports] = useState<
+    Record<string, ManipulationLocalization>
+  >({});
   const [galleryMonitoring, setGalleryMonitoring] = useState(false);
   const [scanSummary, setScanSummary] = useState('');
   const [url, setUrl] = useState('');
@@ -223,6 +233,20 @@ export default function ProtectScreen() {
       Alert.alert('Vérification impossible', getErrorMessage(error));
     } finally {
       setVerifyingId(null);
+    }
+  };
+
+  const localizeManipulation = async (item: ProtectedMedia) => {
+    setBusy(true);
+    setLocalizingId(item.id);
+    try {
+      const result = await localizeProtectedMedia(item);
+      setLocalizationReports((current) => ({ ...current, [item.id]: result }));
+    } catch (error) {
+      Alert.alert('Localisation impossible', getErrorMessage(error));
+    } finally {
+      setLocalizingId(null);
+      setBusy(false);
     }
   };
 
@@ -410,7 +434,9 @@ export default function ProtectScreen() {
 
         {busy && (
           <ThemedText style={styles.centered} themeColor="textSecondary">
-            Création de l’empreinte et de la signature…
+            {localizingId
+              ? 'Analyse IML-ViT des zones suspectes en cours…'
+              : 'Création de l’empreinte et de la signature…'}
           </ThemedText>
         )}
 
@@ -434,6 +460,10 @@ export default function ProtectScreen() {
         <ThemedText type="smallBold" style={styles.sectionTitle}>
           Médias protégés
         </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          La localisation est lancée à la demande : une copie signée est envoyée au serveur NOTOX pour traitement
+          IML-ViT. Le fichier original n’est pas modifié et cette analyse n’utilise pas Gemini.
+        </ThemedText>
         {media.length === 0 ? (
           <ThemedText style={styles.centered} themeColor="textSecondary">
             Vos images protégées apparaîtront ici.
@@ -453,10 +483,40 @@ export default function ProtectScreen() {
                   <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
                     SHA-256 : {item.sha256.slice(0, 20)}…
                   </ThemedText>
+                  <Pressable
+                    onPress={() => void localizeManipulation(item)}
+                    disabled={busy || verifyingId !== null || localizingId !== null}
+                    accessibilityRole="button"
+                    style={styles.verifyButton}
+                  >
+                    <ThemedText type="smallBold" style={styles.verifyButtonText}>
+                      {localizingId === item.id ? 'Calcul de la heatmap…' : 'Localiser les manipulations'}
+                    </ThemedText>
+                  </Pressable>
+                  {localizationReports[item.id] && (
+                    <ThemedView style={styles.localizationResult}>
+                      <ThemedText type="smallBold">Zones suspectes · IML-ViT</ThemedText>
+                      <Image
+                        source={{ uri: localizationReports[item.id].heatmapDataUri }}
+                        style={[
+                          styles.heatmap,
+                          {
+                            aspectRatio:
+                              localizationReports[item.id].imageWidth /
+                              localizationReports[item.id].imageHeight,
+                          },
+                        ]}
+                        contentFit="contain"
+                      />
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {localizationReports[item.id].disclaimer}
+                      </ThemedText>
+                    </ThemedView>
+                  )}
                   {item.syncStatus !== 'synced' && (
                     <Pressable
                       onPress={() => void retrySync(item)}
-                      disabled={verifyingId !== null || busy}
+                      disabled={verifyingId !== null || busy || localizingId !== null}
                       accessibilityRole="button"
                       style={styles.verifyButton}
                     >
@@ -467,7 +527,7 @@ export default function ProtectScreen() {
                   )}
                   <Pressable
                     onPress={() => checkSignature(item)}
-                    disabled={verifyingId !== null}
+                    disabled={verifyingId !== null || busy || localizingId !== null}
                     accessibilityRole="button"
                     style={styles.verifyButton}
                   >
@@ -666,6 +726,16 @@ const styles = StyleSheet.create({
   },
   verifyButtonText: {
     color: '#208AEF',
+  },
+  localizationResult: {
+    gap: Spacing.one,
+    paddingTop: Spacing.two,
+  },
+  heatmap: {
+    width: '100%',
+    maxHeight: 240,
+    borderRadius: Spacing.two,
+    backgroundColor: '#111827',
   },
   urlInput: {
     minHeight: 52,
